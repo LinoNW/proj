@@ -341,7 +341,10 @@ int add_entry_to_directory(int parent_ino, char* name, int child_ino) {
                 block.dirent[j].d_ino = child_ino;
                 strncpy(block.dirent[j].d_name, name, MAXFILENAME);
                 disk_write(parent_inode.dir_block[i], block.data);
-                parent_inode.size += sizeof(struct fs_dirent);
+                int current_offset = (i * DIRENTS_PER_BLOCK + j + 1) * sizeof(struct fs_dirent);
+                if (current_offset > parent_inode.size) {
+                    parent_inode.size = current_offset;
+                }                
                 inode_save(parent_ino, &parent_inode);
                 return 0;
             }
@@ -382,7 +385,10 @@ int add_entry_to_directory(int parent_ino, char* name, int child_ino) {
                 block.dirent[j].d_ino = child_ino;
                 strncpy(block.dirent[j].d_name, name, MAXFILENAME);
                 disk_write(data_block_num, block.data);
-                parent_inode.size += sizeof(struct fs_dirent);
+                int current_offset = (i * DIRENTS_PER_BLOCK + j + 1) * sizeof(struct fs_dirent);
+                if (current_offset > parent_inode.size) {
+                    parent_inode.size = current_offset;
+                }       
                 inode_save(parent_ino, &parent_inode);
                 return 0;
             }
@@ -414,13 +420,11 @@ int fs_ls(char *dirname) {
         return -1;
     }
     
-    // Fixed: Use '.' because inode_of_dir is a struct, not a pointer
     if (inode_of_dir.type != IFDIR) {
         printf("%s is not a directory\n", dirname);
         return -1;
     }
 
-    // Fixed: Use '.' here as well
     int remaining_dirents = inode_of_dir.size / sizeof(struct fs_dirent);
     int offset = 0;
     union fs_block block;
@@ -428,6 +432,9 @@ int fs_ls(char *dirname) {
     printf("ino:type:nlk    bytes name\n");
     while (remaining_dirents > 0) {
         int currBlock = offset2block(&inode_of_dir, offset);
+        
+        if(currBlock == -1) break; //se calhar pode sair (vou ver)
+
         disk_read(currBlock, block.data);
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++) {
             if (block.dirent[d].d_ino != FREE) {
@@ -522,7 +529,6 @@ int fs_create(char *filename) {
                 return -1;
             }
 
-    // Fixed: Created a struct variable. You cannot set .type on an int.
     struct fs_inode new_file_inode;
     memset(&new_file_inode, 0, sizeof(new_file_inode));
     
@@ -548,25 +554,23 @@ int fs_create(char *filename) {
 int fs_mkdir(char *dirname) {
     if (check_rootSB() == -1) return -1;
     
-    // Fixed: Use 'dirname', not 'filename'
     if (dirname == NULL || strlen(dirname) == 0) {
         return -1;
     }
     
     char *file_name = get_filename(dirname);
     
-    // Fixed: Function name is get_parent_inode
     int parent_ino = get_parent_inode(dirname); 
     if (parent_ino == -1) {
         return -1;
     }
 
     struct fs_inode parent_inode;
+
     if (inode_load(parent_ino, &parent_inode) == -1) {
         return -1;
     }
     
-    // Fixed: Use '.' operator
     if (parent_inode.type != IFDIR) {
         return -1;
     }
@@ -580,7 +584,6 @@ int fs_mkdir(char *dirname) {
         return -1;
     }
 
-    // Fixed: Create a struct variable.
     struct fs_inode new_dir_inode;
     memset(&new_dir_inode, 0, sizeof(new_dir_inode));
     
@@ -645,18 +648,14 @@ int fs_unlink(char *filename) {
     char* link_name = get_filename(filename);
     int parent_ino = get_parent_inode(filename);
     
-    // Fixed: Use struct (stack), not pointer
     struct fs_inode parent_inode;
 
     if (parent_ino == -1) return -1;
     
-    // Fixed: Pass address of struct (&)
     if (inode_load(parent_ino, &parent_inode) == -1) return -1;
     
-    // Fixed: Use . operator
     if (parent_inode.type != IFDIR ) return -1;
 
-    // Fixed: Pass address of struct (&)
     int linked_entry_ino = dir_remove_entry(&parent_inode, link_name);
     
     if (linked_entry_ino == -1) return -1;
