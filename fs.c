@@ -363,17 +363,16 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
         int blknum = parent_inode.dir_block[i];
         if (blknum == 0)
         {
-            // Allocate a new block for the directory
             int new_block = block_alloc();
             if (new_block == -1)
             {
-                return -1; // No space left on disk
+                return -1;
             }
             parent_inode.dir_block[i] = new_block;
-
             inode_save(parent_ino, &parent_inode);
-
+            
             memset(block.data, 0, BLOCKSZ);
+            disk_write(new_block, block.data);  // Escrever bloco no disco
         }
         else
         {
@@ -397,7 +396,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
             }
         }
     }
-    // If direct blocks are full, handle indirect block
+    
     uint16_t indirect_block_data[BLOCKSZ / sizeof(uint16_t)];
     int indirect_block_num = parent_inode.indir_block;
 
@@ -406,12 +405,12 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
         indirect_block_num = block_alloc();
         if (indirect_block_num == -1)
         {
-            return -1; // No space for indirect block
+            return -1;
         }
         parent_inode.indir_block = indirect_block_num;
-        inode_save(parent_ino, &parent_inode);                       // Save inode to make new indir block persistent
-        memset(indirect_block_data, 0, BLOCKSZ);                     // Zero out the new indirect block
-        disk_write(indirect_block_num, (char *)indirect_block_data); // ADD THIS LINE
+        inode_save(parent_ino, &parent_inode);
+        memset(indirect_block_data, 0, BLOCKSZ);
+        disk_write(indirect_block_num, (char *)indirect_block_data);
     }
     else
     {
@@ -429,8 +428,9 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
                 return -1;
             }
             indirect_block_data[i] = data_block_num;
-            disk_write(indirect_block_num, (char *)indirect_block_data); // Update the indirect block on disk
-            memset(block.data, 0, BLOCKSZ);                              // Zero out the new data block
+            disk_write(indirect_block_num, (char *)indirect_block_data);
+            memset(block.data, 0, BLOCKSZ);
+            disk_write(data_block_num, block.data);  //Escrever o bloco no disco
         }
         else
         {
@@ -457,9 +457,9 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
         }
     }
 
-    // If we reach here, the indirect block is also full
-    return -1; // No space in directory    return -1; // No space in directory
+    return -1;
 }
+
 
 /*****************************************************/
 
@@ -497,10 +497,13 @@ int fs_ls(char *dirname)
     union fs_block block;
     printf("listing dir %s (inode %d):\n", dirname, number_of_ino);
     printf("ino:type:nlk    bytes name\n");
-    while (remaining_dirents > 0) {
+    
+    while (remaining_dirents > 0)
+    {
         int currBlock = offset2block(&inode_of_dir, offset);
 
-        if (currBlock == -1) return -1;
+        if (currBlock == -1 || currBlock == 0)
+            break;
 
         disk_read(currBlock, block.data);
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++)
@@ -528,6 +531,7 @@ int fs_ls(char *dirname)
     }
     return 0;
 }
+
 
 /** creates a new link to an existing file;
  *  returns the file inode number or -1 if error.
@@ -717,6 +721,10 @@ int dir_remove_entry(struct fs_inode *dir_inode, char *name)
     while (remaining_dirents > 0)
     {
         int currBlock = offset2block(dir_inode, offset);
+        
+        if (currBlock == -1 || currBlock == 0)
+            return -1;
+            
         disk_read(currBlock, block.data);
 
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++)
@@ -724,25 +732,19 @@ int dir_remove_entry(struct fs_inode *dir_inode, char *name)
             if (block.dirent[d].d_ino != FREE &&
                 strncmp(block.dirent[d].d_name, name, MAXFILENAME) == 0)
             {
-
-                // 1. Capture the Inode number before destroying it
                 int removed_ino = block.dirent[d].d_ino;
-
-                // 2. Mark as FREE and clear name
                 block.dirent[d].d_ino = FREE;
                 memset(block.dirent[d].d_name, 0, MAXFILENAME);
-
-                // 3. CRITICAL: Write the modified block back to disk
                 disk_write(currBlock, block.data);
-
                 return removed_ino;
             }
         }
         remaining_dirents -= DIRENTS_PER_BLOCK;
         offset += DIRENTS_PER_BLOCK * sizeof(struct fs_dirent);
     }
-    return -1; // Not found
+    return -1;
 }
+
 
 /** unlinks filename (this is for files);
  *  free inode and data blocks if it is last link.
