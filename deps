@@ -1,4 +1,0 @@
-fso-sh.o: fso-sh.c fs.h disk.h
-fs.o: fs.c bitmap.h fs.h disk.h
-disk.o: disk.c disk.h
-bitmap.o: bitmap.c bitmap.h

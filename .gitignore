@@ -1,0 +1,10 @@
+# Build artifacts
+*.o
+fso-sh
+deps
+
+# macOS
+.DS_Store
+
+# CodeQL
+_codeql_detected_source_root
