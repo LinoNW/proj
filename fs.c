@@ -504,24 +504,21 @@ int fs_ls(char *dirname)
 {
     if (check_rootSB() == -1)
         return -1;
-    if (dirname == NULL)
+    if (dirname == NULL || dirname[0] == '\0')
         dirname = "/";
     int number_of_ino = get_inode(dirname);
     if (number_of_ino == -1)
     {
-        printf("No such directory with name %s\n", dirname);
         return -1;
     }
     struct fs_inode inode_of_dir;
     if (inode_load(number_of_ino, &inode_of_dir) == -1)
     {
-        printf("Error loading inode %d\n", number_of_ino);
         return -1;
     }
 
     if (inode_of_dir.type != IFDIR)
     {
-        printf("%s is not a directory\n", dirname);
         return -1;
     }
 
@@ -535,8 +532,8 @@ int fs_ls(char *dirname)
     {
         int currBlock = offset2block(&inode_of_dir, offset);
 
-        if (currBlock == -1 || currBlock == 0)
-            break;
+        if (currBlock <= 0)
+            return -1;
 
         disk_read(currBlock, block.data);
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++)
@@ -575,6 +572,11 @@ int fs_link(char *filename, char *newlink)
     if (check_rootSB() == -1)
         return -1;
 
+    if (filename == NULL || filename[0] == '\0')
+        return -1;
+    if (newlink == NULL || newlink[0] == '\0')
+        return -1;
+
     int file_ino = get_inode(filename);
     if (file_ino == -1)
     {
@@ -593,6 +595,8 @@ int fs_link(char *filename, char *newlink)
     }
 
     char *newlink_name = get_filename(newlink);
+    if (newlink_name[0] == '\0')
+        return -1;
     int parent_ino = get_parent_inode(newlink);
     struct fs_inode parent_inode;
     if (parent_ino == -1)
@@ -618,7 +622,10 @@ int fs_link(char *filename, char *newlink)
     }
 
     file_inode.nlinks++;
-    inode_save(file_ino, &file_inode);
+    if (inode_save(file_ino, &file_inode) == -1)
+    {
+        return -1;
+    }
 
     return file_ino;
 }
@@ -630,11 +637,11 @@ int fs_create(char *filename)
 {
     if (check_rootSB() == -1)
         return -1;
-    if (filename == NULL || strlen(filename) == 0)
-    {
+    if (filename == NULL || filename[0] == '\0')
         return -1;
-    }
     char *file_name = get_filename(filename);
+    if (file_name[0] == '\0')
+        return -1;
     int parent_ino = get_parent_inode(filename);
     if (parent_ino == -1)
     {
@@ -686,12 +693,12 @@ int fs_mkdir(char *dirname)
     if (check_rootSB() == -1)
         return -1;
 
-    if (dirname == NULL || strlen(dirname) == 0)
-    {
+    if (dirname == NULL || dirname[0] == '\0')
         return -1;
-    }
 
     char *file_name = get_filename(dirname);
+    if (file_name[0] == '\0')
+        return -1;
 
     int parent_ino = get_parent_inode(dirname);
     if (parent_ino == -1)
@@ -787,7 +794,12 @@ int fs_unlink(char *filename)
     if (check_rootSB() == -1)
         return -1;
 
+    if (filename == NULL || filename[0] == '\0')
+        return -1;
+
     char *link_name = get_filename(filename);
+    if (link_name[0] == '\0')
+        return -1;
     int parent_ino = get_parent_inode(filename);
 
     struct fs_inode parent_inode;
@@ -848,7 +860,10 @@ int fs_unlink(char *filename)
     }
     else
     {
-        inode_save(linked_entry_ino, &linked_entry_inode); // Update link count
+        if (inode_save(linked_entry_ino, &linked_entry_inode) == -1)
+        {
+            return -1;
+        }
     }
 
     return linked_entry_ino;
@@ -1005,4 +1020,6 @@ int fs_mount(char *device, int size)
     rootSB = block.super;
     return 0;
 }
+
+
 
