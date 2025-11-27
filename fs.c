@@ -467,7 +467,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
             return -1;
 
         indirect_block_data[indirect_index] = data_block_num;
-        inode_save(parent_ino, &parent_inode);
+        
         disk_write(indirect_block_num, (char *)indirect_block_data);
 
         // Initialize block
