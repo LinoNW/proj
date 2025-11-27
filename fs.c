@@ -390,7 +390,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
         {
             // Reuse this deleted entry (but don't change size!)
             block.dirent[idx_in_block].d_ino = child_ino;
-            strncpy(block.dirent[idx_in_block].d_name, name, MAXFILENAME);
+            strncpy(block.dirent[idx_in_block].d_name, name, MAXFILENAME - 1);
             block.dirent[idx_in_block].d_name[MAXFILENAME - 1] = '\0';
             disk_write(currBlock, block.data);
             return 0;
@@ -428,7 +428,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
 
         // Add entry at the correct position
         block.dirent[entry_index].d_ino = child_ino;
-        strncpy(block.dirent[entry_index].d_name, name, MAXFILENAME);
+        strncpy(block.dirent[entry_index].d_name, name, MAXFILENAME - 1);
         block.dirent[entry_index].d_name[MAXFILENAME - 1] = '\0';
         disk_write(blknum, block.data);
 
@@ -480,7 +480,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
 
     // Add entry at the correct position
     block.dirent[entry_index].d_ino = child_ino;
-    strncpy(block.dirent[entry_index].d_name, name, MAXFILENAME);
+    strncpy(block.dirent[entry_index].d_name, name, MAXFILENAME - 1);
     block.dirent[entry_index].d_name[MAXFILENAME - 1] = '\0';
     disk_write(data_block_num, block.data);
 
@@ -586,7 +586,7 @@ int fs_link(char *filename, char *newlink)
     }
 
     char *newlink_name = get_filename(newlink);
-    if (newlink_name == NULL)
+    if (newlink_name == NULL || strlen(newlink_name) >= MAXFILENAME)
         return -1; // invalid filename
     
     int parent_ino = get_parent_inode(newlink);
@@ -628,7 +628,7 @@ int fs_create(char *filename)
         return -1;
     
     char *file_name = get_filename(filename);
-    if (file_name == NULL)
+    if (file_name == NULL || strlen(file_name) >= MAXFILENAME)
         return -1;
     
     int parent_ino = get_parent_inode(filename);
@@ -683,7 +683,7 @@ int fs_mkdir(char *dirname)
         return -1;
 
     char *file_name = get_filename(dirname);
-    if (file_name == NULL)
+    if (file_name == NULL || strlen(file_name) >= MAXFILENAME)
         return -1;
 
     int parent_ino = get_parent_inode(dirname);
@@ -832,13 +832,8 @@ int fs_unlink(char *filename)
             uint16_t ind_data[BLOCKSZ / sizeof(uint16_t)];
             disk_read(linked_entry_inode.indir_block, (char *)ind_data);
 
-            // Calculate exact number of used indirect blocks
-            int total_blocks = (linked_entry_inode.size + BLOCKSZ - 1) / BLOCKSZ;
-            int indirect_count = total_blocks - DIRBLOCK_PER_INODE;
-            if (indirect_count < 0)
-                indirect_count = 0;
-
-            for (int k = 0; k < indirect_count && k < (BLOCKSZ / sizeof(uint16_t)); k++)
+            // Free ALL non-zero entries in the indirect block
+            for (int k = 0; k < (BLOCKSZ / sizeof(uint16_t)); k++)
             {
                 if (ind_data[k] != 0)
                     block_free(ind_data[k]);

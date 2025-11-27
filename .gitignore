@@ -1,0 +1,7 @@
+# Build artifacts
+*.o
+fso-sh
+deps
+
+# macOS
+.DS_Store
