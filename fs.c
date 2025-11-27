@@ -467,6 +467,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
             return -1;
 
         indirect_block_data[indirect_index] = data_block_num;
+        inode_save(parent_ino, &parent_inode);
         disk_write(indirect_block_num, (char *)indirect_block_data);
 
         // Initialize block
@@ -497,7 +498,7 @@ int fs_ls(char *dirname)
 {
     if (check_rootSB() == -1)
         return -1;
-    if (dirname == NULL)
+    if (dirname == NULL || strlen(dirname) == 0)
         dirname = "/";
     int number_of_ino = get_inode(dirname);
     if (number_of_ino == -1)
@@ -664,6 +665,7 @@ int fs_create(char *filename)
 
     if (inode_save(new_file_ino, &new_file_inode) == -1)
     {
+        inode_free(new_file_ino);
         return -1;
     }
     if (add_entry_to_directory(parent_ino, file_name, new_file_ino) == -1)
@@ -724,6 +726,7 @@ int fs_mkdir(char *dirname)
 
     if (inode_save(new_dir_ino, &new_dir_inode) == -1)
     {
+        inode_free(new_dir_ino);
         return -1;
     }
 
@@ -794,8 +797,9 @@ int fs_unlink(char *filename)
     if (inode_load(parent_ino, &parent_inode) == -1)
         return -1;
 
-    if (parent_inode.type != IFDIR)
+    if (parent_inode.type != IFDIR) 
         return -1;
+    
 
     // First, get the inode number and check if it's a regular file
     int linked_entry_ino = dir_findname(&parent_inode, link_name);
