@@ -375,7 +375,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
         int currBlock = offset2block(&parent_inode, offset);
 
         if (currBlock == -1 || currBlock == 0)
-            break;
+            return -1;
 
         // Only read the block if it's different from the last one
         if (currBlock != last_read_block)
@@ -467,7 +467,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
             return -1;
 
         indirect_block_data[indirect_index] = data_block_num;
-        
+
         disk_write(indirect_block_num, (char *)indirect_block_data);
 
         // Initialize block
@@ -530,7 +530,7 @@ int fs_ls(char *dirname)
         int currBlock = offset2block(&inode_of_dir, offset);
 
         if (currBlock == -1 || currBlock == 0)
-            break;
+            return -1;
 
         disk_read(currBlock, block.data);
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++)
