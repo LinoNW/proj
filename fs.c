@@ -43,7 +43,7 @@ enum inode_type {
 
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
-
+/*****************************************************/
 
 /*** FSO FileSystem in memory structures ***/
 
@@ -89,7 +89,7 @@ union fs_block {
  **/
 struct fs_sblock rootSB;
 
-
+/*****************************************************/
 
 /** checks that the global rootSB contains a valid super block of a formated disk
  *  returns -1 if error; 0 if it's OK
@@ -208,7 +208,7 @@ int block_free(int nblock) {
     return 0;
 }
 
-
+/*****************************************************/
 
 /** finds the disk block number that contains the byte at the given offset
  *  for the file or directory described by the given inode;
@@ -232,7 +232,7 @@ int offset2block(struct fs_inode *inode, int offset) {
     }
 }
 
-
+/*****************************************************/
 
 /** find name in the directory given by dir_inode;
  *  returns its inode number (from dirent); or -1 if error or not found
@@ -257,17 +257,10 @@ int dir_findname(struct fs_inode *dir_inode, char *name) {
     return -1;  // not found
 }
 
-
-
-/*****************************************************/
-
 // converts a path name into an inode number (-1 if error)
 int get_inode(char *path_name)
 {
-    if (path_name == NULL)
-        return -1;
-    
-    if (strcmp(path_name, "/") == 0)
+    if (path_name == NULL || strcmp(path_name, "/") == 0 || strcmp(path_name, "") == 0)
     {
         return ROOTINO;
     }
@@ -278,217 +271,176 @@ int get_inode(char *path_name)
     char path_copy[strlen(path_name) + 1];
     strcpy(path_copy, path_name);
     char *token = strtok(path_copy, "/");
-    
-    //se for do-while pode dar erro se input for ´////´
-    while (token != NULL)
+
+    do
     {
         if (inode_load(curr_ino, &curr_inode) == -1)
+        {
             return -1;
+        }
         if (curr_inode.type != IFDIR)
+        {
             return -1;
+        }
 
         int next_ino = dir_findname(&curr_inode, token);
         if (next_ino == -1)
+        {
             return -1;
-
+        }
         curr_ino = next_ino;
         token = strtok(NULL, "/");
-    }
+    } while (token != NULL);
 
     return curr_ino;
 }
 
 int get_parent_inode(char *pathname)
 {
-    if (pathname == NULL || strlen(pathname) == 0)
-        return ROOTINO;
-    
-    // Make a copy to avoid modifying the original
     char path_copy[strlen(pathname) + 1];
     strcpy(path_copy, pathname);
-    
-    // Find the last slash
-    char *last_slash = strrchr(path_copy, '/');
-    
+    char *last_slash = strrchr(path_copy, '/'); // makes a reverse search for '/'
     if (last_slash == NULL)
     {
-        // No slash found, parent is root
-        return ROOTINO;
+        return ROOTINO; // No slash found, parent is root
     }
-    
     if (last_slash == path_copy)
     {
-        // Path like '/filename', parent is root
-        return ROOTINO;
+        return ROOTINO; // Parent is root
     }
-    
-    // Truncate at the last slash to get parent path
-    *last_slash = '\0';
-    
-    // Get the inode of the parent directory
-    int parent_ino = get_inode(path_copy);
-    if (parent_ino == -1)
-        return -1;
-    
-    return parent_ino;
+    *last_slash = '\0'; // Terminate the string to get parent path
+    return get_inode(path_copy);
 }
 
 char *get_filename(char *pathname)
 {
-    if (pathname == NULL)
-        return NULL;
-    
-    // Empty string should also return NULL (invalid filename)
-    if (strlen(pathname) == 0)
-        return NULL;
-    
     char *last_slash = strrchr(pathname, '/');
     if (last_slash == NULL)
     {
         return pathname; // No slash found, entire pathname is filename
     }
-    
-    // Skip the slash and return filename
-    char *filename = last_slash + 1;
-    // If filename is empty (path ends with '/'), return NULL
-    if (*filename == '\0')
-        return NULL;
-    return filename;
+    else
+    {
+        return last_slash + 1; // Return substring after last slash
+    }
 }
 
 int add_entry_to_directory(int parent_ino, char *name, int child_ino)
 {
     struct fs_inode parent_inode;
-    if (inode_load(parent_ino, &parent_inode) == -1)
-        return -1;
+    inode_load(parent_ino, &parent_inode);
 
     union fs_block block;
+    int byte_offset = 0;
 
-    // First, search for a FREE entry in existing blocks
-    int num_entries = parent_inode.size / sizeof(struct fs_dirent);
-    int offset = 0;
-    int last_read_block = -1;
+    // First pass: search for FREE entry in existing blocks
+    int entries_remaining = parent_inode.size / sizeof(struct fs_dirent);
 
-    for (int entry_idx = 0; entry_idx < num_entries; entry_idx++)
+    while (entries_remaining > 0)
     {
-        offset = entry_idx * sizeof(struct fs_dirent);
-        int currBlock = offset2block(&parent_inode, offset);
+        int blk_num = offset2block(&parent_inode, byte_offset);
 
-        if (currBlock == -1 || currBlock == 0)
-            return -1;
+        if (blk_num == -1 || blk_num == 0)
+            break;
 
-        // Only read the block if it's different from the last one
-        if (currBlock != last_read_block)
-        {
-            disk_read(currBlock, block.data);
-            last_read_block = currBlock;
-        }
+        disk_read(blk_num, block.data);
         
-        int idx_in_block = entry_idx % DIRENTS_PER_BLOCK;
-
-        if (block.dirent[idx_in_block].d_ino == FREE)
+        for (int j = 0; j < DIRENTS_PER_BLOCK && entries_remaining > 0; j++, entries_remaining--)
         {
-            // Reuse this deleted entry (but don't change size!)
-            block.dirent[idx_in_block].d_ino = child_ino;
-            strncpy(block.dirent[idx_in_block].d_name, name, MAXFILENAME);
-            block.dirent[idx_in_block].d_name[MAXFILENAME - 1] = '\0';
-            disk_write(currBlock, block.data);
-            return 0;
+            if (block.dirent[j].d_ino == FREE)
+            {
+                // Reuse this FREE entry
+                block.dirent[j].d_ino = child_ino;
+                strncpy(block.dirent[j].d_name, name, MAXFILENAME);
+                block.dirent[j].d_name[MAXFILENAME - 1] = '\0';
+                disk_write(blk_num, block.data);
+                return 0;
+            }
         }
+        byte_offset += BLOCKSZ;
     }
 
-    // No FREE entry found, need to add at the end
-    // Calculate which block should receive the new entry
+    // Second pass: need to extend directory - add new entry at end
     int total_entries = parent_inode.size / sizeof(struct fs_dirent);
-    int block_index = total_entries / DIRENTS_PER_BLOCK;
-    int entry_index = total_entries % DIRENTS_PER_BLOCK;
+    int block_idx = total_entries / DIRENTS_PER_BLOCK;
+    int entry_idx = total_entries % DIRENTS_PER_BLOCK;
 
     // Try direct blocks
-    if (block_index < DIRBLOCK_PER_INODE)
+    if (block_idx < DIRBLOCK_PER_INODE)
     {
-        int blknum = parent_inode.dir_block[block_index];
+        int blknum = parent_inode.dir_block[block_idx];
         if (blknum == 0)
         {
-            // Allocate new block
-            int new_block = block_alloc();
-            if (new_block == -1)
+            blknum = block_alloc();
+            if (blknum == -1)
                 return -1;
 
-            parent_inode.dir_block[block_index] = new_block;
-            blknum = new_block;
-
-            // Initialize block
+            parent_inode.dir_block[block_idx] = blknum;
             memset(block.data, 0, BLOCKSZ);
         }
         else
         {
-            // Read existing block
             disk_read(blknum, block.data);
         }
 
-        // Add entry at the correct position
-        block.dirent[entry_index].d_ino = child_ino;
-        strncpy(block.dirent[entry_index].d_name, name, MAXFILENAME);
-        block.dirent[entry_index].d_name[MAXFILENAME - 1] = '\0';
+        block.dirent[entry_idx].d_ino = child_ino;
+        strncpy(block.dirent[entry_idx].d_name, name, MAXFILENAME);
+        block.dirent[entry_idx].d_name[MAXFILENAME - 1] = '\0';
         disk_write(blknum, block.data);
 
-        // Update size and save inode
         parent_inode.size += sizeof(struct fs_dirent);
         inode_save(parent_ino, &parent_inode);
         return 0;
     }
 
     // Need indirect blocks
-    int indirect_index = block_index - DIRBLOCK_PER_INODE;
-    uint16_t indirect_block_data[BLOCKSZ / sizeof(uint16_t)];
-    int indirect_block_num = parent_inode.indir_block;
+    int indirect_idx = block_idx - DIRBLOCK_PER_INODE;
+    uint16_t indirect_data[BLOCKSZ / sizeof(uint16_t)];
+    int indirect_blk = parent_inode.indir_block;
 
-    if (indirect_block_num == 0)
+    if (indirect_blk == 0)
     {
-        indirect_block_num = block_alloc();
-        if (indirect_block_num == -1)
+        indirect_blk = block_alloc();
+        if (indirect_blk == -1)
             return -1;
 
-        parent_inode.indir_block = indirect_block_num;
-        
-        memset(indirect_block_data, 0, BLOCKSZ);
-        disk_write(indirect_block_num, (char *)indirect_block_data);
+        parent_inode.indir_block = indirect_blk;
+        memset(indirect_data, 0, BLOCKSZ);
+        disk_write(indirect_blk, (char *)indirect_data);
     }
     else
     {
-        disk_read(indirect_block_num, (char *)indirect_block_data);
+        disk_read(indirect_blk, (char *)indirect_data);
     }
 
-    int data_block_num = indirect_block_data[indirect_index];
-    if (data_block_num == 0)
+    int data_blk = indirect_data[indirect_idx];
+    if (data_blk == 0)
     {
-        data_block_num = block_alloc();
-        if (data_block_num == -1)
+        data_blk = block_alloc();
+        if (data_blk == -1)
             return -1;
 
-        indirect_block_data[indirect_index] = data_block_num;
-
-        disk_write(indirect_block_num, (char *)indirect_block_data);
-
-        // Initialize block
+        indirect_data[indirect_idx] = data_blk;
+        disk_write(indirect_blk, (char *)indirect_data);
         memset(block.data, 0, BLOCKSZ);
     }
     else
     {
-        // Read existing block
-        disk_read(data_block_num, block.data);
+        disk_read(data_blk, block.data);
     }
 
-    // Add entry at the correct position
-    block.dirent[entry_index].d_ino = child_ino;
-    strncpy(block.dirent[entry_index].d_name, name, MAXFILENAME);
-    block.dirent[entry_index].d_name[MAXFILENAME - 1] = '\0';
-    disk_write(data_block_num, block.data);
+    block.dirent[entry_idx].d_ino = child_ino;
+    strncpy(block.dirent[entry_idx].d_name, name, MAXFILENAME);
+    block.dirent[entry_idx].d_name[MAXFILENAME - 1] = '\0';
+    disk_write(data_blk, block.data);
 
     parent_inode.size += sizeof(struct fs_dirent);
     inode_save(parent_ino, &parent_inode);
     return 0;
 }
+
+
+/*****************************************************/
 
 /** list the content of directory dirname
  *  dirname may start with "/" or not;
@@ -496,16 +448,19 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
  */
 int fs_ls(char *dirname)
 {
-    if (check_rootSB() == -1)
-        return -1;
+    if (check_rootSB() == -1) return -1;
+    
+    // Tratamento robusto para strings vazias
     if (dirname == NULL || strlen(dirname) == 0)
         dirname = "/";
+
     int number_of_ino = get_inode(dirname);
     if (number_of_ino == -1)
     {
         printf("No such directory with name %s\n", dirname);
         return -1;
     }
+    
     struct fs_inode inode_of_dir;
     if (inode_load(number_of_ino, &inode_of_dir) == -1)
     {
@@ -522,15 +477,17 @@ int fs_ls(char *dirname)
     int remaining_dirents = inode_of_dir.size / sizeof(struct fs_dirent);
     int offset = 0;
     union fs_block block;
+    
+    // Formatação exata do enunciado
     printf("listing dir %s (inode %d):\n", dirname, number_of_ino);
     printf("ino:type:nlk    bytes name\n");
-
+    
     while (remaining_dirents > 0)
     {
         int currBlock = offset2block(&inode_of_dir, offset);
-
-        if (currBlock == -1 || currBlock == 0)
-            return -1;
+        
+        // Se bloco é invalido mas ainda devia haver entradas, paramos
+        if (currBlock == -1 || currBlock == 0) break;
 
         disk_read(currBlock, block.data);
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++)
@@ -541,17 +498,15 @@ int fs_ls(char *dirname)
                 if (inode_load(block.dirent[d].d_ino, &entry_inode) != -1)
                 {
                     char type = '?';
-                    if (entry_inode.type == IFDIR)
-                    {
-                        type = 'D';
-                    }
-                    else if (entry_inode.type == IFREG)
-                    {
-                        type = 'F';
-                    }
-                    printf("%3d:%4c:%3d%9d %s\n",
-                           block.dirent[d].d_ino, type, entry_inode.nlinks,
-                           entry_inode.size, block.dirent[d].d_name);
+                    if (entry_inode.type == IFDIR) type = 'd';
+                    else if (entry_inode.type == IFREG) type = 'f';
+                    
+                    printf("%3d:%4c:%3d%9d %s\n", 
+                           block.dirent[d].d_ino, 
+                           type, 
+                           entry_inode.nlinks, 
+                           entry_inode.size, 
+                           block.dirent[d].d_name);
                 }
             }
         }
@@ -560,6 +515,9 @@ int fs_ls(char *dirname)
     }
     return 0;
 }
+
+
+
 
 /** creates a new link to an existing file;
  *  returns the file inode number or -1 if error.
@@ -587,9 +545,6 @@ int fs_link(char *filename, char *newlink)
     }
 
     char *newlink_name = get_filename(newlink);
-    if (newlink_name == NULL)
-        return -1; // invalid filename
-    
     int parent_ino = get_parent_inode(newlink);
     struct fs_inode parent_inode;
     if (parent_ino == -1)
@@ -627,11 +582,11 @@ int fs_create(char *filename)
 {
     if (check_rootSB() == -1)
         return -1;
-    
-    char *file_name = get_filename(filename);
-    if (file_name == NULL)
+    if (filename == NULL || strlen(filename) == 0)
+    { // Ver se o nome é válido
         return -1;
-    
+    }
+    char *file_name = get_filename(filename);
     int parent_ino = get_parent_inode(filename);
     if (parent_ino == -1)
     {
@@ -643,14 +598,14 @@ int fs_create(char *filename)
         return -1;
     }
     if (parent_inode.type != IFDIR)
-    {
+    { // Ver se o pai é um diretório
         return -1;
     }
     if (dir_findname(&parent_inode, file_name) != -1)
     {
         return -1; // file already exists
     }
-    int new_file_ino = inode_alloc();
+    int new_file_ino = inode_alloc(); // Alocar um novo inode
     if (new_file_ino == -1)
     {
         return -1;
@@ -665,11 +620,10 @@ int fs_create(char *filename)
 
     if (inode_save(new_file_ino, &new_file_inode) == -1)
     {
-        inode_free(new_file_ino);
-        return -1;
+        return -1; // Será que temos de dar free?
     }
     if (add_entry_to_directory(parent_ino, file_name, new_file_ino) == -1)
-    {
+    {                             // Adicionar a entrada ao diretório pai
         inode_free(new_file_ino); // cleanup
         return -1;
     }
@@ -684,9 +638,12 @@ int fs_mkdir(char *dirname)
     if (check_rootSB() == -1)
         return -1;
 
-    char *file_name = get_filename(dirname);
-    if (file_name == NULL)
+    if (dirname == NULL || strlen(dirname) == 0)
+    {
         return -1;
+    }
+
+    char *file_name = get_filename(dirname);
 
     int parent_ino = get_parent_inode(dirname);
     if (parent_ino == -1)
@@ -726,7 +683,6 @@ int fs_mkdir(char *dirname)
 
     if (inode_save(new_dir_ino, &new_dir_inode) == -1)
     {
-        inode_free(new_dir_ino);
         return -1;
     }
 
@@ -740,6 +696,7 @@ int fs_mkdir(char *dirname)
 
 /** * Finds name in directory, marks it as FREE on disk, and returns the
  * inode number that was removed. Returns -1 if not found.
+ * LIN
  */
 int dir_remove_entry(struct fs_inode *dir_inode, char *name)
 {
@@ -750,10 +707,10 @@ int dir_remove_entry(struct fs_inode *dir_inode, char *name)
     while (remaining_dirents > 0)
     {
         int currBlock = offset2block(dir_inode, offset);
-
+        
         if (currBlock == -1 || currBlock == 0)
             return -1;
-
+            
         disk_read(currBlock, block.data);
 
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++)
@@ -774,6 +731,7 @@ int dir_remove_entry(struct fs_inode *dir_inode, char *name)
     return -1;
 }
 
+
 /** unlinks filename (this is for files);
  *  free inode and data blocks if it is last link.
  *  returns filename inode number or -1 if error.
@@ -784,9 +742,6 @@ int fs_unlink(char *filename)
         return -1;
 
     char *link_name = get_filename(filename);
-    if (link_name == NULL)
-        return -1;
-    
     int parent_ino = get_parent_inode(filename);
 
     struct fs_inode parent_inode;
@@ -797,12 +752,11 @@ int fs_unlink(char *filename)
     if (inode_load(parent_ino, &parent_inode) == -1)
         return -1;
 
-    if (parent_inode.type != IFDIR) 
+    if (parent_inode.type != IFDIR)
         return -1;
-    
 
-    // First, get the inode number and check if it's a regular file
-    int linked_entry_ino = dir_findname(&parent_inode, link_name);
+    int linked_entry_ino = dir_remove_entry(&parent_inode, link_name);
+
     if (linked_entry_ino == -1)
         return -1;
 
@@ -811,11 +765,6 @@ int fs_unlink(char *filename)
         return -1;
 
     if (linked_entry_inode.type != IFREG)
-        return -1;
-
-    // Now remove the directory entry
-    int removed_ino = dir_remove_entry(&parent_inode, link_name);
-    if (removed_ino == -1)
         return -1;
 
     linked_entry_inode.nlinks--;
@@ -839,8 +788,6 @@ int fs_unlink(char *filename)
             // Calculate exact number of used indirect blocks
             int total_blocks = (linked_entry_inode.size + BLOCKSZ - 1) / BLOCKSZ;
             int indirect_count = total_blocks - DIRBLOCK_PER_INODE;
-            if (indirect_count < 0)
-                indirect_count = 0;
 
             for (int k = 0; k < indirect_count && k < (BLOCKSZ / sizeof(uint16_t)); k++)
             {
@@ -859,6 +806,7 @@ int fs_unlink(char *filename)
     return linked_entry_ino;
 }
 
+/*****************************************************/
 
 /** dump Super block (usually block 0) from disk to stdout for debugging
  */
@@ -999,5 +947,4 @@ int fs_mount(char *device, int size) {
     rootSB = block.super;
     return 0;
 }
-
 
