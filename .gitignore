@@ -1,0 +1,8 @@
+# Compiled object files
+*.o
+
+# Executable
+fso-sh
+
+# Dependencies
+deps

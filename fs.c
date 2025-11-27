@@ -221,6 +221,8 @@ int offset2block(struct fs_inode *inode, int offset) {
         return inode->dir_block[blkindex];
     } else if (blkindex < DIRBLOCK_PER_INODE + BLOCKSZ / sizeof(uint16_t)) {
         // blkindex is in the indirect block of indexes
+        if (inode->indir_block == 0)
+            return 0;
         uint16_t data[BLOCKSZ / sizeof(uint16_t)];
 
         disk_read(inode->indir_block, (char*)data);
@@ -245,6 +247,8 @@ int dir_findname(struct fs_inode *dir_inode, char *name) {
 
     while ( remaining_dirents>0 ) {
         int currBlock = offset2block(dir_inode, offset);
+        if (currBlock == -1 || currBlock == 0)
+            return -1;
         disk_read(currBlock, block.data);
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++) {
             if (block.dirent[d].d_ino!=FREE
@@ -375,7 +379,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
         int currBlock = offset2block(&parent_inode, offset);
 
         if (currBlock == -1 || currBlock == 0)
-            return -1;
+            break;
 
         // Only read the block if it's different from the last one
         if (currBlock != last_read_block)
@@ -450,6 +454,7 @@ int add_entry_to_directory(int parent_ino, char *name, int child_ino)
             return -1;
 
         parent_inode.indir_block = indirect_block_num;
+        inode_save(parent_ino, &parent_inode);
         
         memset(indirect_block_data, 0, BLOCKSZ);
         disk_write(indirect_block_num, (char *)indirect_block_data);
@@ -530,7 +535,7 @@ int fs_ls(char *dirname)
         int currBlock = offset2block(&inode_of_dir, offset);
 
         if (currBlock == -1 || currBlock == 0)
-            return -1;
+            break;
 
         disk_read(currBlock, block.data);
         for (int d = 0; d < DIRENTS_PER_BLOCK && d < remaining_dirents; d++)
