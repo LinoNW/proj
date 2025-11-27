@@ -264,7 +264,10 @@ int dir_findname(struct fs_inode *dir_inode, char *name) {
 // converts a path name into an inode number (-1 if error)
 int get_inode(char *path_name)
 {
-    if (path_name == NULL || strcmp(path_name, "/") == 0 || strcmp(path_name, "") == 0)
+    if (path_name == NULL)
+        return -1;
+    
+    if (strcmp(path_name, "/") == 0)
     {
         return ROOTINO;
     }
@@ -333,6 +336,10 @@ int get_parent_inode(char *pathname)
 char *get_filename(char *pathname)
 {
     if (pathname == NULL)
+        return NULL;
+    
+    // Empty string should also return NULL (invalid filename)
+    if (strlen(pathname) == 0)
         return NULL;
     
     char *last_slash = strrchr(pathname, '/');
@@ -619,10 +626,7 @@ int fs_create(char *filename)
 {
     if (check_rootSB() == -1)
         return -1;
-    if (filename == NULL || strlen(filename) == 0)
-    {
-        return -1;
-    }
+    
     char *file_name = get_filename(filename);
     if (file_name == NULL)
         return -1;
@@ -677,11 +681,6 @@ int fs_mkdir(char *dirname)
 {
     if (check_rootSB() == -1)
         return -1;
-
-    if (dirname == NULL || strlen(dirname) == 0)
-    {
-        return -1;
-    }
 
     char *file_name = get_filename(dirname);
     if (file_name == NULL)
